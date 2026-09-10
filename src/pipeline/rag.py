@@ -124,14 +124,6 @@ class RAGPipeline:
         print("\n-- Indexação concluída --\n")
         return total_indexado
 
-    def build_rag_pipeline(corpus_dir: str = "data/corpus") -> RAGPipeline:
-        """Cria pipeline e indexa corpus se ainda não indexado (ou incompleto)."""
-        pipeline = RAGPipeline(corpus_dir=corpus_dir)
-        total_esperado = len(pipeline._build_chunks())
-        if pipeline.collection.count() < total_esperado:
-            pipeline.ingest_and_index()
-        return pipeline
-
     def retrieve(self, query: str, k: int = 5) -> list[dict]:
         """Busca top-k chunks similares à query."""
         result = self.collection.query(query_texts=[query], n_results=k)
@@ -181,6 +173,7 @@ RESPOSTA:"""
 def build_rag_pipeline(corpus_dir: str = "data/corpus") -> RAGPipeline:
     """Cria pipeline e indexa corpus se ainda não indexado."""
     pipeline = RAGPipeline(corpus_dir=corpus_dir)
-    if pipeline.collection.count() < 50:
+    total_esperado = len(pipeline._build_chunks())
+    if pipeline.collection.count() < total_esperado:
         pipeline.ingest_and_index()
     return pipeline
