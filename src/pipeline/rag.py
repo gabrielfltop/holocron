@@ -61,37 +61,28 @@ class RAGPipeline:
             name=collection_name, embedding_function=self.embed_fn
         )
 
-    def ingest_and_index(self) -> int:
-        """Lê PDFs e TXTs de `corpus_dir`, faz chunking e indexa em Chroma."""
+    def _build_chunks(self) -> list[dict]:
+        """Lê PDFs e TXTs de `corpus_dir`, faz chunking. Não chama a API de embedding."""
         docs: list[dict] = []
-
+    
         for pdf_path in sorted(self.corpus_dir.glob("*.pdf")):
             reader = PdfReader(pdf_path)
             for page_idx, page in enumerate(reader.pages):
                 text = page.extract_text() or ""
                 if text.strip():
-                    docs.append({
-                        "text": text,
-                        "source": pdf_path.name,
-                        "page": page_idx + 1,
-                    })
-
+                    docs.append({"text": text, "source": pdf_path.name, "page": page_idx + 1})
+    
         for txt_path in sorted(self.corpus_dir.glob("*.txt")):
             full_text = txt_path.read_text(encoding="utf-8")
             blocks = [b.strip() for b in full_text.split("---") if b.strip()]
             for i, block in enumerate(blocks):
-                docs.append({
-                    "text": block,
-                    "source": txt_path.name,
-                    "page": i + 1,
-                })
-
+                docs.append({"text": block, "source": txt_path.name, "page": i + 1})
+    
         splitter = RecursiveCharacterTextSplitter(
-            chunk_size=800,
-            chunk_overlap=100,
+            chunk_size=800, chunk_overlap=100,
             separators=["\n\n", "\n", ". ", " ", ""],
         )
-
+    
         chunks: list[dict] = []
         for doc in docs:
             for i, chunk in enumerate(splitter.split_text(doc["text"])):
@@ -101,21 +92,45 @@ class RAGPipeline:
                     "source": doc["source"],
                     "page": doc["page"],
                 })
+        return chunks
 
-        print(f"\n-- Iniciando indexação: {len(chunks)} chunks de {len(docs)} docs --\n")
-
+    def ingest_and_index(self) -> int:
+        """Faz chunking e indexa em Chroma."""
+        chunks = self._build_chunks()
+        print(f"\n-- Iniciando indexação: {len(chunks)} chunks --\n")
+    
         BATCH_SIZE = 10
+        DELAY_SECONDS = 4.5
+    
         for i in range(0, len(chunks), BATCH_SIZE):
             lote = chunks[i : i + BATCH_SIZE]
-            self.collection.add(
-                ids=[c["id"] for c in lote],
-                documents=[c["text"] for c in lote],
-                metadatas=[{"source": c["source"], "page": c["page"]} for c in lote],
-            )
-            time.sleep(1)
-
+            for tentativa in range(3):
+                try:
+                    self.collection.add(
+                        ids=[c["id"] for c in lote],
+                        documents=[c["text"] for c in lote],
+                        metadatas=[{"source": c["source"], "page": c["page"]} for c in lote],
+                    )
+                    break
+                except Exception as e:
+                    print(f"Erro no batch {i}: {e}. Retry em {DELAY_SECONDS * 2}s...")
+                    time.sleep(DELAY_SECONDS * 2)
+            time.sleep(DELAY_SECONDS)
+    
+        total_indexado = self.collection.count()
+        if total_indexado < len(chunks):
+            print(f"AVISO: indexação incompleta ({total_indexado}/{len(chunks)} chunks).")
+    
         print("\n-- Indexação concluída --\n")
-        return self.collection.count()
+        return total_indexado
+
+    def build_rag_pipeline(corpus_dir: str = "data/corpus") -> RAGPipeline:
+        """Cria pipeline e indexa corpus se ainda não indexado (ou incompleto)."""
+        pipeline = RAGPipeline(corpus_dir=corpus_dir)
+        total_esperado = len(pipeline._build_chunks())
+        if pipeline.collection.count() < total_esperado:
+            pipeline.ingest_and_index()
+        return pipeline
 
     def retrieve(self, query: str, k: int = 5) -> list[dict]:
         """Busca top-k chunks similares à query."""
@@ -166,6 +181,6 @@ RESPOSTA:"""
 def build_rag_pipeline(corpus_dir: str = "data/corpus") -> RAGPipeline:
     """Cria pipeline e indexa corpus se ainda não indexado."""
     pipeline = RAGPipeline(corpus_dir=corpus_dir)
-    if pipeline.collection.count() == 0:
+    if pipeline.collection.count() < 50:
         pipeline.ingest_and_index()
     return pipeline
