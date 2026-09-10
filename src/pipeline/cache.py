@@ -55,7 +55,7 @@ class SemanticCache:
 
     def get(self, query: str) -> str | None:
         """Retorna resposta cacheada se similar a alguma query anterior, ou None."""
-        if not self._queries:
+        if not self._embeddings:
             return None
 
         e = self._embed(query)
@@ -70,8 +70,9 @@ class SemanticCache:
         return None
 
     def put(self, query: str, answer: str) -> None:
+        embedding = self._embed(query)
         self._queries.append(query)
-        self._embeddings.append(self._embed(query))
+        self._embeddings.append(embedding)
         self._answers.append(answer)
 
     def stats(self) -> dict[str, Any]:
