@@ -6,9 +6,9 @@ __pycache__/
 .ruff_cache/
 .venv/
 .ipynb_checkpoints/
+*.egg-info/
 
 # Dados e cache
-data/chroma/
 data/cache/
 *.log
 

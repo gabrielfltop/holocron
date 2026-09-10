@@ -64,25 +64,25 @@ class RAGPipeline:
     def _build_chunks(self) -> list[dict]:
         """Lê PDFs e TXTs de `corpus_dir`, faz chunking. Não chama a API de embedding."""
         docs: list[dict] = []
-    
+
         for pdf_path in sorted(self.corpus_dir.glob("*.pdf")):
             reader = PdfReader(pdf_path)
             for page_idx, page in enumerate(reader.pages):
                 text = page.extract_text() or ""
                 if text.strip():
                     docs.append({"text": text, "source": pdf_path.name, "page": page_idx + 1})
-    
+
         for txt_path in sorted(self.corpus_dir.glob("*.txt")):
             full_text = txt_path.read_text(encoding="utf-8")
             blocks = [b.strip() for b in full_text.split("---") if b.strip()]
             for i, block in enumerate(blocks):
                 docs.append({"text": block, "source": txt_path.name, "page": i + 1})
-    
+
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=800, chunk_overlap=100,
             separators=["\n\n", "\n", ". ", " ", ""],
         )
-    
+
         chunks: list[dict] = []
         for doc in docs:
             for i, chunk in enumerate(splitter.split_text(doc["text"])):
@@ -95,16 +95,23 @@ class RAGPipeline:
         return chunks
 
     def ingest_and_index(self) -> int:
-        """Faz chunking e indexa em Chroma."""
+        """Faz chunking e indexa em Chroma.
+
+        Para a indexação (em vez de seguir silenciosamente) se um batch
+        falhar após todas as tentativas — evita gastar cota em batches
+        que muito provavelmente também vão falhar pelo mesmo motivo
+        (ex.: cota diária esgotada).
+        """
         chunks = self._build_chunks()
         print(f"\n-- Iniciando indexação: {len(chunks)} chunks --\n")
-    
+
         BATCH_SIZE = 10
         DELAY_SECONDS = 4.5
-    
+        MAX_TENTATIVAS = 3
+
         for i in range(0, len(chunks), BATCH_SIZE):
             lote = chunks[i : i + BATCH_SIZE]
-            for tentativa in range(3):
+            for tentativa in range(MAX_TENTATIVAS):
                 try:
                     self.collection.add(
                         ids=[c["id"] for c in lote],
@@ -115,12 +122,22 @@ class RAGPipeline:
                 except Exception as e:
                     print(f"Erro no batch {i}: {e}. Retry em {DELAY_SECONDS * 2}s...")
                     time.sleep(DELAY_SECONDS * 2)
+            else:
+                # Loop terminou sem 'break': todas as MAX_TENTATIVAS falharam.
+                total_indexado = self.collection.count()
+                print(
+                    f"\nERRO: batch {i} falhou após {MAX_TENTATIVAS} tentativas. "
+                    "Parando a indexação para não continuar gastando cota em "
+                    "batches que também vão falhar pelo mesmo motivo."
+                )
+                print(f"-- Indexação interrompida: {total_indexado}/{len(chunks)} chunks --\n")
+                return total_indexado
             time.sleep(DELAY_SECONDS)
-    
+
         total_indexado = self.collection.count()
         if total_indexado < len(chunks):
             print(f"AVISO: indexação incompleta ({total_indexado}/{len(chunks)} chunks).")
-    
+
         print("\n-- Indexação concluída --\n")
         return total_indexado
 
