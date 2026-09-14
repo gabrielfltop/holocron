@@ -81,9 +81,15 @@ Detalhes da indexação (`RAGPipeline.ingest_and_index`):
 git clone <seu-repo>
 cd holocron
 
-# 2. Dependências
+# 2. Dependências (escolha uma opção)
+
+## Opção A — uv (recomendado)
 uv venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
 uv sync
+
+## Opção B — pip
+python -m venv .venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
 
 # 3. API key
 cp .env.example .env
@@ -96,7 +102,18 @@ python build_corpus.py
 streamlit run src/ui/streamlit_app.py
 ```
 
+> **Sobre `uv` e `uv.lock`:** o `pyproject.toml` tem `[tool.uv] package = false`, ou seja, o `uv sync` instala só as dependências, não o próprio projeto como pacote editável (os imports internos funcionam via path relativo, não via instalação do pacote `holocron`). O `uv.lock` gerado localmente **não é versionado** (está no `.gitignore`) — cada pessoa gera o seu ao rodar `uv sync` pela primeira vez. Isso é proposital: o Streamlit Community Cloud dá prioridade máxima a um `uv.lock` commitado na hora de resolver dependências, e por causa do `package = false` acima ele falha em encontrar o "pacote raiz" do projeto durante esse processo — por isso o deploy usa `requirements.txt` (veja a seção [Deploy](#deploy)).
+
 > O `.env.example` também lista uma opção de chave Anthropic para o `LLM_MODEL`, mas hoje **só Gemini e OpenAI estão de fato implementados** em `rag.py`, `cache.py` e `routing.py` (o cliente é sempre `OpenAI(...)` apontado pro endpoint OpenAI-compatible do Gemini, ou direto pra OpenAI). Se for usar Claude, é preciso adicionar esse branch.
+
+## Deploy
+
+O deploy no Streamlit Community Cloud usa `requirements.txt` (na raiz do repo) em vez do `pyproject.toml`/`uv.lock`, por uma particularidade do Community Cloud: ele dá prioridade a um `uv.lock` commitado sobre qualquer outro arquivo de dependências, e o `uv sync` resultante falha ao resolver o pacote `holocron` (projeto não é uma lib instalável — não existe `src/holocron/`, o código vive em `src/pipeline`, `src/ui`, etc.). Por isso:
+
+- `requirements.txt` é mantido sincronizado manualmente com as `dependencies` do `pyproject.toml` e é o que o Cloud efetivamente usa para instalar
+- `uv.lock` é gitignored, então nunca sobe e nunca disputa prioridade
+- `data/chroma/` (índice já gerado) é commitado propositalmente — veja a nota na seção [Estrutura](#estrutura) — para o app não precisar reindexar o corpus a cada novo deploy
+- A API key (`GEMINI_API_KEY` ou `OPENAI_API_KEY`) é configurada em **Settings → Secrets** no app do Streamlit Cloud, no formato `CHAVE = "valor"` sem seção `[bloco]`, para virar variável de ambiente de fato
 
 ## Observability
 
@@ -149,7 +166,7 @@ Os testes são pulados automaticamente (`pytest.skip`) se não houver `GEMINI_AP
 holocron/
 ├── data/
 │   ├── corpus/               # roteiros (.txt) + SWAPI (.txt) + PDFs opcionais
-│   └── chroma/                # vector store (gitignored)
+│   └── chroma/                # vector store — commitado de propósito (ver seção Deploy)
 ├── docs/
 │   └── observability.md      # guia de logging estruturado + integração Langfuse
 ├── src/
