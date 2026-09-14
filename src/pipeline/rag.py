@@ -106,7 +106,7 @@ class RAGPipeline:
         print(f"\n-- Iniciando indexação: {len(chunks)} chunks --\n")
 
         BATCH_SIZE = 10
-        DELAY_SECONDS = 4.5
+        DELAY_SECONDS = 0
         MAX_TENTATIVAS = 3
 
         for i in range(0, len(chunks), BATCH_SIZE):
