@@ -33,6 +33,9 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.uv]
+package = false
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"
